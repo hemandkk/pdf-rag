@@ -1,19 +1,28 @@
 from pathlib import Path
 
 import fitz
-# import pymupdf  # Future-proof way
+
+
+class PDFPage:
+    def __init__(
+        self,
+        page_number: int,
+        text: str,
+    ) -> None:
+        self.page_number = page_number
+        self.text = text
 
 
 class PDFService:
     @staticmethod
-    def extract_text(file_path: str) -> tuple[str, int]:
+    def extract_pages(
+        file_path: str,
+    ) -> list[PDFPage]:
         """
-        Extract text from a PDF.
+        Extract text from a PDF page by page.
 
-        Returns:
-            tuple[str, int]:
-                - extracted text
-                - number of pages
+        Page numbers are 1-based so they match what users
+        see in the PDF viewer.
         """
 
         pdf_path = Path(file_path)
@@ -26,17 +35,40 @@ class PDFService:
         document = fitz.open(file_path)
 
         try:
-            pages = []
+            pages: list[PDFPage] = []
 
-            for page in document:
-                text = page.get_text()
+            for index, page in enumerate(document):
+                text = page.get_text().strip()
 
-                if text.strip():
-                    pages.append(text.strip())
+                if not text:
+                    continue
 
-            full_text = "\n\n".join(pages)
+                pages.append(
+                    PDFPage(
+                        page_number=index + 1,
+                        text=text,
+                    )
+                )
 
-            return full_text, len(document)
+            return pages
 
         finally:
             document.close()
+
+    @staticmethod
+    def extract_text(
+        file_path: str,
+    ) -> tuple[str, int]:
+        """
+        Backward-compatible helper that returns the
+        complete extracted text and page count.
+        """
+
+        pages = PDFService.extract_pages(file_path)
+
+        full_text = "\n\n".join(
+            page.text
+            for page in pages
+        )
+
+        return full_text, len(pages)
