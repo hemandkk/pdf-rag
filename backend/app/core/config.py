@@ -10,21 +10,49 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "uploads"
     VECTOR_DB_DIR: str = "chroma"
 
+    DATABASE_URL: str = "sqlite:///./rag.db"
+
     MAX_FILE_SIZE_MB: int = 20
 
-    # Embedding provider
+    # -------------------------
+    #  RAG configuration - Similarity threshold
+    # -------------------------
+    RAG_TOP_K: int = 5
+    RAG_SIMILARITY_THRESHOLD: float = 0.35
+
+    # -------------------------
+    # Embedding configuration
+    # -------------------------
+
     EMBEDDING_PROVIDER: str = "local"
 
-    # Local embedding model
     LOCAL_EMBEDDING_MODEL: str = (
         "sentence-transformers/all-MiniLM-L6-v2"
     )
 
-    # OpenAI embedding model
-    OPENAI_API_KEY: str | None = None
     OPENAI_EMBEDDING_MODEL: str = (
         "text-embedding-3-small"
     )
+
+    # -------------------------
+    # LLM configuration
+    # -------------------------
+
+    LLM_PROVIDER: str = "gemini"
+
+    OPENAI_API_KEY: str | None = None
+
+    OPENAI_LLM_MODEL: str = "gpt-6-luna"
+
+    GEMINI_API_KEY: str | None = None
+
+    GEMINI_LLM_MODEL: str = "gemini-3.8-flash"
+
+    # -------------------------
+    # RAG configuration
+    # -------------------------
+
+    RAG_TOP_K: int = 5
 
     model_config = SettingsConfigDict(
         env_file=".env",

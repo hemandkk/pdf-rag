@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -5,6 +6,15 @@ import chromadb
 
 from app.core.config import settings
 from app.services.chunk_service import DocumentChunk
+
+
+@dataclass
+class SearchResult:
+    text: str
+    document_id: str
+    page_number: int
+    chunk_index: int
+    similarity: float
 
 
 class VectorService:
@@ -71,22 +81,79 @@ class VectorService:
     def search(
         self,
         query_embedding: list[float],
+        document_id: str,
         top_k: int = 5,
-        document_id: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> list[SearchResult]:
 
-        where = None
-
-        if document_id:
-            where = {
-                "document_id": document_id,
-            }
-
-        return self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k,
-            where=where,
+        results: dict[str, Any] = (
+            self.collection.query(
+                query_embeddings=[
+                    query_embedding
+                ],
+                n_results=top_k,
+                where={
+                    "document_id": document_id,
+                },
+                include=[
+                    "documents",
+                    "metadatas",
+                    "distances",
+                ],
+            )
         )
+
+        documents = results.get(
+            "documents"
+        )
+
+        metadatas = results.get(
+            "metadatas"
+        )
+
+        distances = results.get(
+            "distances"
+        )
+
+        if (
+            not documents
+            or not metadatas
+            or not distances
+        ):
+            return []
+
+        search_results: list[
+            SearchResult
+        ] = []
+
+        for text, metadata, distance in zip(
+            documents[0],
+            metadatas[0],
+            distances[0],
+            strict=True,
+        ):
+            search_results.append(
+                SearchResult(
+                    text=text,
+                    document_id=str(
+                        metadata[
+                            "document_id"
+                        ]
+                    ),
+                    page_number=int(
+                        metadata[
+                            "page_number"
+                        ]
+                    ),
+                    chunk_index=int(
+                        metadata[
+                            "chunk_index"
+                        ]
+                    ),
+                    similarity=1.0 - float(distance),
+                )
+            )
+
+        return search_results
 
     def count(self) -> int:
         return self.collection.count()

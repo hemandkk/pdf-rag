@@ -3,7 +3,9 @@ uvicorn[standard]
 python-multipart
 pymupdf
 pydantic-settings
+sqlalchemy
 chromadb
 sentence-transformers
 openai
+google-genai
 ruff
