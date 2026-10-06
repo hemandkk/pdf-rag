@@ -3,6 +3,7 @@ uvicorn[standard]
 python-multipart
 pymupdf
 pydantic-settings
-openai
 chromadb
+sentence-transformers
+openai
 ruff

@@ -57,7 +57,7 @@ class RAGIngestionService:
         ]
 
         embeddings = (
-            self.embedding_service.create_embeddings(
+            self.embedding_service.embed_documents(
                 texts
             )
         )

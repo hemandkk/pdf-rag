@@ -12,8 +12,19 @@ class Settings(BaseSettings):
 
     MAX_FILE_SIZE_MB: int = 20
 
-    OPENAI_API_KEY: str
-    EMBEDDING_MODEL: str = "text-embedding-3-small"
+    # Embedding provider
+    EMBEDDING_PROVIDER: str = "local"
+
+    # Local embedding model
+    LOCAL_EMBEDDING_MODEL: str = (
+        "sentence-transformers/all-MiniLM-L6-v2"
+    )
+
+    # OpenAI embedding model
+    OPENAI_API_KEY: str | None = None
+    OPENAI_EMBEDDING_MODEL: str = (
+        "text-embedding-3-small"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",
