@@ -4,6 +4,7 @@ python-multipart
 pymupdf
 pydantic-settings
 sqlalchemy
+alembic
 chromadb
 sentence-transformers
 openai

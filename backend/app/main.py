@@ -1,50 +1,53 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes.chat import (
-    router as chat_router,
-)
-from app.api.routes.documents import (
-    router as documents_router,
-)
-from app.api.routes.search import (
-    router as search_router,
-)
+from app.api.routes import chat, documents, search
 from app.core.config import settings
-from app.db.database import Base
-from app.db.database import engine
-from app.db.models import Document
 
 
-Base.metadata.create_all(
-    bind=engine
-)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
 
 
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
+    lifespan=lifespan,
+)
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
 app.include_router(
-    documents_router,
+    documents.router,
     prefix="/api/v1",
 )
 
 app.include_router(
-    chat_router,
+    chat.router,
     prefix="/api/v1",
 )
 
 app.include_router(
-    search_router,
+    search.router,
     prefix="/api/v1",
 )
 
 
 @app.get("/health")
-async def health_check() -> dict[str, str]:
+def health_check() -> dict[str, str]:
     return {
         "status": "ok",
-        "message": "PDF RAG API is running",
     }

@@ -9,6 +9,7 @@ __pycache__/
 /coverage
 /uploads
 
+rag.db
 
 # misc
 .DS_Store
