@@ -2,9 +2,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-from app.api.routes import chat, documents, search
 from app.core.config import settings
+from app.api.routes import (
+    chat,
+    conversations,
+    documents,
+    knowledge_bases,
+    search,
+)
 
 
 @asynccontextmanager
@@ -36,15 +41,25 @@ app.include_router(
 )
 
 app.include_router(
-    chat.router,
-    prefix="/api/v1",
-)
-
-app.include_router(
     search.router,
     prefix="/api/v1",
 )
 
+app.include_router(
+    chat.router,
+    prefix="/api/v1",
+)
+
+
+app.include_router(
+    conversations.router,
+    prefix="/api/v1",
+)
+
+app.include_router(
+    knowledge_bases.router,
+    prefix="/api/v1",
+)
 
 @app.get("/health")
 def health_check() -> dict[str, str]:

@@ -1,54 +1,64 @@
-from dataclasses import dataclass
-
+from app.db.models.document import Document
+from app.repositories.document_repository import (
+    DocumentRepository,
+)
 from app.services.chunk_service import ChunkService
 from app.services.embedding_service import EmbeddingService
 from app.services.pdf_service import PDFService
 from app.services.vector_service import VectorService
 
 
-@dataclass
-class IngestionResult:
-    document_id: str
-    page_count: int
-    character_count: int
-    chunk_count: int
-    text_preview: str
-
-
-class RAGIngestionService:
-    def __init__(self) -> None:
-        self.pdf_service = PDFService()
-        self.embedding_service = EmbeddingService()
-        self.vector_service = VectorService()
-
-    def ingest_document(
+class RagIngestionService:
+    def __init__(
         self,
-        document_id: str,
-        file_path: str,
-    ) -> IngestionResult:
+        pdf_service: PDFService,
+        chunk_service: ChunkService,
+        embedding_service: EmbeddingService,
+        vector_service: VectorService,
+        document_repository: DocumentRepository,
+    ) -> None:
+        self.pdf_service = pdf_service
+        self.chunk_service = chunk_service
+        self.embedding_service = embedding_service
+        self.vector_service = vector_service
+        self.document_repository = document_repository
 
+    def ingest(
+        self,
+        document: Document,
+    ) -> Document:
         pages = self.pdf_service.extract_pages(
-            file_path
+            document.file_path
         )
 
-        if not pages:
-            raise ValueError(
-                "No extractable text found in PDF."
-            )
+        document.page_count = len(pages)
 
-        full_text = "\n\n".join(
-            page.text
+        document.character_count = sum(
+            len(page.text)
             for page in pages
         )
 
-        chunks = ChunkService.create_chunks(
-            document_id=document_id,
+        chunks = self.chunk_service.create_chunks(
+            document_id=document.id,
             pages=pages,
         )
 
+        document.chunk_count = len(chunks)
+
         if not chunks:
+            document.status = "failed"
+            document.error_message = (
+                "No text could be extracted "
+                "from the PDF."
+            )
+
+            self.document_repository.update(
+                document
+            )
+
             raise ValueError(
-                "No chunks were created from PDF."
+                "No text could be extracted "
+                "from the PDF."
             )
 
         texts = [
@@ -62,15 +72,27 @@ class RAGIngestionService:
             )
         )
 
-        self.vector_service.add_chunks(
-            chunks=chunks,
-            embeddings=embeddings,
+        document.embedding_provider = (
+            self.embedding_service.provider_name
         )
 
-        return IngestionResult(
-            document_id=document_id,
-            page_count=len(pages),
-            character_count=len(full_text),
-            chunk_count=len(chunks),
-            text_preview=full_text[:2000],
+        document.embedding_model = (
+            self.embedding_service.model_name
         )
+
+        self.vector_service.add_documents(
+            chunks=chunks,
+            embeddings=embeddings,
+            knowledge_base_id=(
+                document.knowledge_base_id
+            ),
+        )
+
+        document.status = "completed"
+        document.error_message = None
+
+        self.document_repository.update(
+            document
+        )
+
+        return document

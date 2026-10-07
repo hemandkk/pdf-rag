@@ -9,18 +9,24 @@ class EmbeddingService:
         self,
         provider: EmbeddingProvider | None = None,
     ) -> None:
-
         self.provider = (
             provider
             if provider is not None
             else create_embedding_provider()
         )
 
+    @property
+    def provider_name(self) -> str:
+        return self.provider.provider_name
+
+    @property
+    def model_name(self) -> str:
+        return self.provider.model_name
+
     def embed_documents(
         self,
         texts: list[str],
     ) -> list[list[float]]:
-
         return self.provider.embed_documents(
             texts
         )
@@ -29,7 +35,6 @@ class EmbeddingService:
         self,
         text: str,
     ) -> list[float]:
-
         return self.provider.embed_query(
             text
         )

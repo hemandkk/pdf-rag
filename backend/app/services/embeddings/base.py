@@ -2,6 +2,16 @@ from abc import ABC, abstractmethod
 
 
 class EmbeddingProvider(ABC):
+    @property
+    @abstractmethod
+    def provider_name(self) -> str:
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def model_name(self) -> str:
+        raise NotImplementedError
+
     @abstractmethod
     def embed_documents(
         self,

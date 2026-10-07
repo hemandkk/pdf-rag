@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 import chromadb
@@ -10,10 +9,11 @@ from app.services.chunk_service import DocumentChunk
 
 @dataclass
 class SearchResult:
-    text: str
+    chunk_id: str
     document_id: str
     page_number: int
     chunk_index: int
+    text: str
     similarity: float
 
 
@@ -21,139 +21,141 @@ class VectorService:
     COLLECTION_NAME = "pdf_documents"
 
     def __init__(self) -> None:
-        vector_db_path = Path(
-            settings.VECTOR_DB_DIR
-        )
-
-        vector_db_path.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
         self.client = chromadb.PersistentClient(
-            path=str(vector_db_path)
+            path=settings.CHROMA_DIR
         )
 
-        self.collection = (
-            self.client.get_or_create_collection(
-                name=self.COLLECTION_NAME,
-                metadata={
-                    "hnsw:space": "cosine",
-                },
-            )
+        self.collection = self.client.get_or_create_collection(
+            name=self.COLLECTION_NAME,
+            metadata={
+                "hnsw:space": "cosine",
+            },
         )
 
-    def add_chunks(
+    def add_documents(
         self,
         chunks: list[DocumentChunk],
         embeddings: list[list[float]],
+        knowledge_base_id: str,
     ) -> None:
-
         if not chunks:
             return
 
         if len(chunks) != len(embeddings):
             raise ValueError(
-                "Number of chunks must match "
-                "number of embeddings."
+                "Number of chunks and embeddings must match."
             )
 
-        self.collection.add(
-            ids=[
-                chunk.chunk_id
-                for chunk in chunks
-            ],
-            embeddings=embeddings,
-            documents=[
-                chunk.text
-                for chunk in chunks
-            ],
-            metadatas=[
+        ids: list[str] = []
+        documents: list[str] = []
+        metadatas: list[dict[str, Any]] = []
+
+        for chunk in chunks:
+            ids.append(chunk.chunk_id)
+            documents.append(chunk.text)
+
+            metadatas.append(
                 {
+                    "knowledge_base_id": knowledge_base_id,
                     "document_id": chunk.document_id,
                     "page_number": chunk.page_number,
                     "chunk_index": chunk.chunk_index,
                 }
-                for chunk in chunks
-            ],
+            )
+
+        self.collection.add(
+            ids=ids,
+            documents=documents,
+            embeddings=embeddings,
+            metadatas=metadatas,
         )
 
     def search(
         self,
         query_embedding: list[float],
-        document_id: str,
-        top_k: int = 5,
+        knowledge_base_id: str,
+        top_k: int,
     ) -> list[SearchResult]:
-
-        results: dict[str, Any] = (
-            self.collection.query(
-                query_embeddings=[
-                    query_embedding
-                ],
-                n_results=top_k,
-                where={
-                    "document_id": document_id,
-                },
-                include=[
-                    "documents",
-                    "metadatas",
-                    "distances",
-                ],
+        if top_k <= 0:
+            raise ValueError(
+                "top_k must be greater than zero."
             )
+
+        results = self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=top_k,
+            where={
+                "knowledge_base_id": knowledge_base_id,
+            },
+            include=[
+                "documents",
+                "metadatas",
+                "distances",
+            ],
         )
 
-        documents = results.get(
-            "documents"
-        )
-
-        metadatas = results.get(
-            "metadatas"
-        )
-
-        distances = results.get(
-            "distances"
-        )
+        ids = results.get("ids")
+        documents = results.get("documents")
+        metadatas = results.get("metadatas")
+        distances = results.get("distances")
 
         if (
-            not documents
+            not ids
+            or not documents
             or not metadatas
             or not distances
         ):
             return []
 
-        search_results: list[
-            SearchResult
-        ] = []
+        result_ids = ids[0]
+        result_documents = documents[0]
+        result_metadatas = metadatas[0]
+        result_distances = distances[0]
 
-        for text, metadata, distance in zip(
-            documents[0],
-            metadatas[0],
-            distances[0],
+        search_results: list[SearchResult] = []
+
+        for (
+            chunk_id,
+            text,
+            metadata,
+            distance,
+        ) in zip(
+            result_ids,
+            result_documents,
+            result_metadatas,
+            result_distances,
             strict=True,
         ):
+            if metadata is None:
+                continue
+
+            similarity = 1.0 - float(distance)
+
             search_results.append(
                 SearchResult(
-                    text=text,
+                    chunk_id=str(chunk_id),
                     document_id=str(
-                        metadata[
-                            "document_id"
-                        ]
+                        metadata["document_id"]
                     ),
                     page_number=int(
-                        metadata[
-                            "page_number"
-                        ]
+                        metadata["page_number"]
                     ),
                     chunk_index=int(
-                        metadata[
-                            "chunk_index"
-                        ]
+                        metadata["chunk_index"]
                     ),
-                    similarity=1.0 - float(distance),
+                    text=str(text),
+                    similarity=similarity,
                 )
             )
 
         return search_results
 
-    def count(self) -> int:
-        return self.collection.count()
+    def delete_document(
+        self,
+        document_id: str,
+    ) -> None:
+        self.collection.delete(
+            where={
+                "document_id": document_id,
+            }
+        )

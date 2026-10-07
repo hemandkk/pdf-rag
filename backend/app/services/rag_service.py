@@ -1,117 +1,183 @@
-from app.services.llm_service import (
-    LLMService,
+from collections.abc import Iterator
+
+from app.schemas.chat import (
+    ChatResponse,
+    SourceResponse,
 )
+from app.services.llm_service import LLMService
 from app.services.retrieval_service import (
     RetrievalService,
-)
-from app.services.vector_service import (
-    SearchResult,
 )
 
 
 class RAGService:
-    def __init__(self) -> None:
-        self.retrieval_service = (
-            RetrievalService()
-        )
-
-        self.llm_service = (
-            LLMService()
-        )
-
-    def answer_question(
+    def __init__(
         self,
-        document_id: str,
-        question: str,
-        top_k: int | None = None,
-    ) -> tuple[
-        str,
-        list[SearchResult],
-    ]:
+        retrieval_service: RetrievalService,
+        llm_service: LLMService,
+    ) -> None:
+        self.retrieval_service = retrieval_service
+        self.llm_service = llm_service
 
-        search_results = (
-            self.retrieval_service.search(
-                document_id=document_id,
-                query=question,
-                top_k=top_k,
-            )
-        )
-
-        if not search_results:
-            return (
-                "I could not find relevant "
-                "information in the document.",
-                [],
-            )
-
-        context = self._build_context(
-            search_results
-        )
-
-        prompt = self._build_prompt(
-            question=question,
-            context=context,
-        )
-
-        answer = self.llm_service.generate(
-            prompt
-        )
-
-        return answer, search_results
-
-    @staticmethod
-    def _build_context(
-        search_results: list[
-            SearchResult
-        ],
-    ) -> str:
-
-        context_parts: list[str] = []
-
-        for result in search_results:
-            context_parts.append(
-                (
-                    f"[Page "
-                    f"{result.page_number}]\n"
-                    f"{result.text}"
-                )
-            )
-
-        return "\n\n".join(
-            context_parts
-        )
-
-    @staticmethod
     def _build_prompt(
+        self,
         question: str,
         context: str,
+        history: list[dict[str, str]] | None = None,
     ) -> str:
+        history = history or []
+
+        history_text = "\n".join(
+            (
+                f"{message['role'].capitalize()}: "
+                f"{message['content']}"
+            )
+            for message in history
+        )
+
+        if not history_text:
+            history_text = "No previous conversation."
 
         return f"""
-You are a document question-answering assistant.
+You are a helpful assistant answering questions
+about the documents available in the knowledge base.
 
 Answer the user's question using ONLY the
-information contained in the provided context.
+provided document context.
+
+Conversation history may be used to understand
+references such as "it", "they", "that section",
+or follow-up questions.
+
+However, conversation history is NOT evidence.
+The retrieved document context is the source of truth.
 
 Rules:
-
 1. Do not use outside knowledge.
 2. Do not invent information.
-3. If the context does not contain enough
-   information to answer the question, say:
-   "I could not find that information in
-   the document."
-4. Keep the answer clear and concise.
-5. When appropriate, mention the page number
-   using the format [Page X].
+3. If the retrieved context does not contain enough
+   information, say:
+   "I could not find that information in the documents."
+4. When useful, mention the relevant page using
+   [Page X].
+5. When useful, identify the source document.
+6. Give a clear and concise answer.
 
-Context:
+Conversation history:
+--------------------
+{history_text}
+--------------------
 
+Retrieved document context:
+----------------------------
 {context}
+----------------------------
 
-Question:
-
+Current user question:
 {question}
 
 Answer:
 """.strip()
+
+    def _build_context(
+        self,
+        results,
+    ) -> str:
+        context_parts: list[str] = []
+
+        for result in results:
+            context_parts.append(
+                f"[Document ID: {result.document_id}]\n"
+                f"[Page {result.page_number}]\n"
+                f"{result.text}"
+            )
+
+        return "\n\n".join(context_parts)
+
+    def _build_sources(
+        self,
+        results,
+    ) -> list[SourceResponse]:
+        return [
+            SourceResponse(
+                document_id=result.document_id,
+                page_number=result.page_number,
+                chunk_index=result.chunk_index,
+                text=result.text,
+                similarity=result.similarity,
+            )
+            for result in results
+        ]
+
+    def chat(
+        self,
+        question: str,
+        history: list[dict[str, str]] | None = None,
+        top_k: int | None = None,
+    ) -> ChatResponse:
+        results = self.retrieval_service.search(
+            query=question,
+            top_k=top_k,
+        )
+
+        if not results:
+            return ChatResponse(
+                question=question,
+                answer=(
+                    "I could not find that information "
+                    "in the documents."
+                ),
+                sources=[],
+            )
+
+        context = self._build_context(results)
+
+        prompt = self._build_prompt(
+            question=question,
+            context=context,
+            history=history,
+        )
+
+        answer = self.llm_service.generate(prompt)
+
+        return ChatResponse(
+            question=question,
+            answer=answer,
+            sources=self._build_sources(results),
+        )
+
+    def stream(
+        self,
+        question: str,
+        history: list[dict[str, str]] | None = None,
+        top_k: int | None = None,
+    ) -> tuple[list[SourceResponse], Iterator[str]]:
+        results = self.retrieval_service.search(
+            query=question,
+            top_k=top_k,
+        )
+
+        sources = self._build_sources(results)
+
+        if not results:
+
+            def fallback_stream() -> Iterator[str]:
+                yield (
+                    "I could not find that information "
+                    "in the documents."
+                )
+
+            return sources, fallback_stream()
+
+        context = self._build_context(results)
+
+        prompt = self._build_prompt(
+            question=question,
+            context=context,
+            history=history,
+        )
+
+        return (
+            sources,
+            self.llm_service.stream(prompt),
+        )

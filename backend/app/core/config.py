@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     APP_NAME: str = "PDF RAG API"
     APP_VERSION: str = "1.0.0"
-
+    CHROMA_DIR: str = "chroma"
     UPLOAD_DIR: str = "uploads"
     VECTOR_DB_DIR: str = "chroma"
 
@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     #  RAG configuration - Similarity threshold
     # -------------------------
     RAG_TOP_K: int = 5
-    RAG_SIMILARITY_THRESHOLD: float = 0.35
+    RAG_SIMILARITY_THRESHOLD: float = 0.20
 
     # -------------------------
     # Embedding configuration

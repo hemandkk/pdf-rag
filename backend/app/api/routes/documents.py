@@ -1,31 +1,33 @@
-import uuid
-from pathlib import Path
-
-from fastapi import APIRouter
-from fastapi import Depends
-from fastapi import File
-from fastapi import HTTPException
-from fastapi import UploadFile
-from fastapi import status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    UploadFile,
+    status,
+)
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.db.database import get_db
-from app.schemas.document import (
-    DocumentListResponse,
+from app.repositories.document_repository import (
+    DocumentRepository,
 )
-from app.schemas.document import (
-    DocumentResponse,
+from app.repositories.knowledge_base_repository import (
+    KnowledgeBaseRepository,
 )
-from app.schemas.document import (
-    DocumentUploadResponse,
-)
+from app.schemas.document import DocumentResponse
+from app.services.chunk_service import ChunkService
 from app.services.document_service import (
     DocumentService,
 )
-from app.services.rag_ingestion_service import (
-    RAGIngestionService,
+from app.services.embedding_service import (
+    EmbeddingService,
 )
+from app.services.pdf_service import PDFService
+from app.services.rag_ingestion_service import (
+    RagIngestionService,
+)
+from app.services.vector_service import VectorService
 
 
 router = APIRouter(
@@ -34,183 +36,86 @@ router = APIRouter(
 )
 
 
+def get_document_service(
+    db: Session = Depends(get_db),
+) -> DocumentService:
+    document_repository = (
+        DocumentRepository(db)
+    )
+
+    knowledge_base_repository = (
+        KnowledgeBaseRepository(db)
+    )
+
+    pdf_service = PDFService()
+
+    chunk_service = ChunkService()
+
+    embedding_service = (
+        EmbeddingService()
+    )
+
+    vector_service = VectorService()
+
+    rag_ingestion_service = (
+        RagIngestionService(
+            pdf_service=pdf_service,
+            chunk_service=chunk_service,
+            embedding_service=embedding_service,
+            vector_service=vector_service,
+            document_repository=document_repository,
+        )
+    )
+
+    return DocumentService(
+        document_repository=document_repository,
+        knowledge_base_repository=(
+            knowledge_base_repository
+        ),
+        rag_ingestion_service=(
+            rag_ingestion_service
+        ),
+    )
+
+
 @router.post(
-    "/upload",
-    response_model=DocumentUploadResponse,
+    "",
+    response_model=DocumentResponse,
     status_code=status.HTTP_201_CREATED,
 )
-async def upload_document(
+def upload_document(
     file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-) -> DocumentUploadResponse:
+    service: DocumentService = Depends(
+        get_document_service
+    ),
+) -> DocumentResponse:
+    try:
+        return service.upload(file)
 
-    if not file.filename:
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Filename is required.",
-        )
-
-    file_extension = Path(
-        file.filename
-    ).suffix.lower()
-
-    if file_extension != ".pdf":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only PDF files are supported.",
-        )
-
-    upload_directory = Path(
-        settings.UPLOAD_DIR
-    )
-
-    upload_directory.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    document_id = str(
-        uuid.uuid4()
-    )
-
-    stored_filename = (
-        f"{document_id}.pdf"
-    )
-
-    file_path = (
-        upload_directory
-        / stored_filename
-    )
-
-    max_file_size = (
-        settings.MAX_FILE_SIZE_MB
-        * 1024
-        * 1024
-    )
-
-    total_size = 0
-
-    try:
-        with file_path.open(
-            "wb"
-        ) as destination:
-
-            while chunk := await file.read(
-                1024 * 1024
-            ):
-
-                total_size += len(chunk)
-
-                if total_size > max_file_size:
-
-                    destination.close()
-
-                    if file_path.exists():
-                        file_path.unlink()
-
-                    raise HTTPException(
-                        status_code=(
-                            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
-                        ),
-                        detail=(
-                            f"PDF size cannot exceed "
-                            f"{settings.MAX_FILE_SIZE_MB} MB."
-                        ),
-                    )
-
-                destination.write(chunk)
-
-    finally:
-        await file.close()
-
-    document_service = (
-        DocumentService(db)
-    )
-
-    document = (
-        document_service.create_processing_document(
-            document_id=document_id,
-            filename=file.filename,
-            stored_filename=stored_filename,
-            file_path=str(file_path),
-        )
-    )
-
-    try:
-        ingestion_service = (
-            RAGIngestionService()
-        )
-
-        result = (
-            ingestion_service.ingest_document(
-                document_id=document_id,
-                file_path=str(file_path),
-            )
-        )
-
-        document_service.mark_ready(
-            document=document,
-            page_count=result.page_count,
-            character_count=(
-                result.character_count
-            ),
-            chunk_count=result.chunk_count,
-        )
-
-    except Exception as exc:
-
-        document_service.mark_failed(
-            document=document,
-            error_message=str(exc),
-        )
-
-        raise HTTPException(
-            status_code=(
-                status.HTTP_400_BAD_REQUEST
-            ),
-            detail=(
-                f"Unable to process PDF: {str(exc)}"
-            ),
+            detail=str(exc),
         ) from exc
-
-    return DocumentUploadResponse(
-        document_id=document.id,
-        filename=document.filename,
-        page_count=document.page_count,
-        character_count=(
-            document.character_count
-        ),
-        chunk_count=document.chunk_count,
-        status=document.status,
-        text_preview=result.text_preview,
-    )
 
 
 @router.get(
     "",
-    response_model=DocumentListResponse,
+    response_model=list[DocumentResponse],
 )
 def list_documents(
-    db: Session = Depends(get_db),
-) -> DocumentListResponse:
+    service: DocumentService = Depends(
+        get_document_service
+    ),
+) -> list[DocumentResponse]:
+    try:
+        return service.list_all()
 
-    document_service = (
-        DocumentService(db)
-    )
-
-    documents = (
-        document_service.list_all()
-    )
-
-    return DocumentListResponse(
-        documents=[
-            DocumentResponse.model_validate(
-                document,
-                from_attributes=True,
-            )
-            for document in documents
-        ]
-    )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get(
@@ -219,26 +124,15 @@ def list_documents(
 )
 def get_document(
     document_id: str,
-    db: Session = Depends(get_db),
+    service: DocumentService = Depends(
+        get_document_service
+    ),
 ) -> DocumentResponse:
+    try:
+        return service.get(document_id)
 
-    document_service = (
-        DocumentService(db)
-    )
-
-    document = (
-        document_service.get_by_id(
-            document_id
-        )
-    )
-
-    if document is None:
+    except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found.",
-        )
-
-    return DocumentResponse.model_validate(
-        document,
-        from_attributes=True,
-    )
+            detail=str(exc),
+        ) from exc

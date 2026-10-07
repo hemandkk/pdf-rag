@@ -10,11 +10,18 @@ class LocalEmbeddingProvider(EmbeddingProvider):
             settings.LOCAL_EMBEDDING_MODEL
         )
 
+    @property
+    def provider_name(self) -> str:
+        return "local"
+
+    @property
+    def model_name(self) -> str:
+        return settings.LOCAL_EMBEDDING_MODEL
+
     def embed_documents(
         self,
         texts: list[str],
     ) -> list[list[float]]:
-
         if not texts:
             return []
 
@@ -30,7 +37,6 @@ class LocalEmbeddingProvider(EmbeddingProvider):
         self,
         text: str,
     ) -> list[float]:
-
         embedding = self.model.encode_query(
             text,
             normalize_embeddings=True,

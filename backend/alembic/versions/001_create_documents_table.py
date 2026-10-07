@@ -11,11 +11,10 @@ import sqlalchemy as sa
 from alembic import op
 
 
-revision: str = "001_create_documents"
-down_revision: str | Sequence[str] | None = None
-branch_labels: str | Sequence[str] | None = None
-depends_on: str | Sequence[str] | None = None
-
+revision: str = "0001"
+down_revision = None
+branch_labels = None
+depends_on = None
 
 def upgrade() -> None:
     op.create_table(

@@ -1,112 +1,211 @@
-from sqlalchemy.orm import Session
+from pathlib import Path
+from uuid import uuid4
+
+from fastapi import UploadFile
 
 from app.core.config import settings
+from app.core.constants import (
+    DEFAULT_KNOWLEDGE_BASE_ID,
+)
 from app.db.models.document import Document
 from app.repositories.document_repository import (
     DocumentRepository,
+)
+from app.repositories.knowledge_base_repository import (
+    KnowledgeBaseRepository,
+)
+from app.services.rag_ingestion_service import (
+    RagIngestionService,
 )
 
 
 class DocumentService:
     def __init__(
         self,
-        db: Session,
+        document_repository: DocumentRepository,
+        knowledge_base_repository: KnowledgeBaseRepository,
+        rag_ingestion_service: RagIngestionService,
     ) -> None:
-        self.repository = (
-            DocumentRepository(db)
+        self.document_repository = (
+            document_repository
         )
 
-    def create_processing_document(
+        self.knowledge_base_repository = (
+            knowledge_base_repository
+        )
+
+        self.rag_ingestion_service = (
+            rag_ingestion_service
+        )
+
+    def upload(
         self,
-        document_id: str,
-        filename: str,
-        stored_filename: str,
-        file_path: str,
+        file: UploadFile,
     ) -> Document:
+        knowledge_base = (
+            self.knowledge_base_repository.get_by_id(
+                DEFAULT_KNOWLEDGE_BASE_ID
+            )
+        )
+
+        if knowledge_base is None:
+            raise ValueError(
+                "Default knowledge base does not exist."
+            )
+
+        self._validate_pdf(file)
+
+        document_id = str(uuid4())
+
+        original_filename = (
+            file.filename
+            or "document.pdf"
+        )
+
+        stored_filename = (
+            f"{document_id}.pdf"
+        )
+
+        upload_directory = Path(
+            settings.UPLOAD_DIR
+        )
+
+        upload_directory.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        file_path = (
+            upload_directory
+            / stored_filename
+        )
+
+        with file_path.open(
+            "wb"
+        ) as output_file:
+            while True:
+                chunk = file.file.read(
+                    1024 * 1024
+                )
+
+                if not chunk:
+                    break
+
+                output_file.write(chunk)
 
         document = Document(
             id=document_id,
-            filename=filename,
+            knowledge_base_id=(
+                DEFAULT_KNOWLEDGE_BASE_ID
+            ),
+            filename=original_filename,
             stored_filename=stored_filename,
-            file_path=file_path,
-            embedding_provider=(
-                settings.EMBEDDING_PROVIDER
-            ),
-            embedding_model=(
-                self._get_embedding_model()
-            ),
+            file_path=str(file_path),
+            page_count=0,
+            character_count=0,
+            chunk_count=0,
+            embedding_provider=None,
+            embedding_model=None,
             status="processing",
+            error_message=None,
         )
 
-        return self.repository.create(
-            document
+        document = (
+            self.document_repository.create(
+                document
+            )
         )
 
-    def mark_ready(
-        self,
-        document: Document,
-        page_count: int,
-        character_count: int,
-        chunk_count: int,
-    ) -> Document:
+        try:
+            self.rag_ingestion_service.ingest(
+                document
+            )
 
-        document.page_count = page_count
-        document.character_count = (
-            character_count
-        )
-        document.chunk_count = chunk_count
-        document.status = "ready"
-        document.error_message = None
+        except Exception as exc:
+            document.status = "failed"
+            document.error_message = str(exc)
 
-        return self.repository.update(
-            document
-        )
+            self.document_repository.update(
+                document
+            )
 
-    def mark_failed(
-        self,
-        document: Document,
-        error_message: str,
-    ) -> Document:
+            raise
 
-        document.status = "failed"
-        document.error_message = (
-            error_message
-        )
-
-        return self.repository.update(
-            document
-        )
-
-    def get_by_id(
-        self,
-        document_id: str,
-    ) -> Document | None:
-
-        return self.repository.get_by_id(
-            document_id
-        )
+        return document
 
     def list_all(
         self,
     ) -> list[Document]:
-
-        return self.repository.list_all()
-
-    @staticmethod
-    def _get_embedding_model() -> str:
-
-        provider = (
-            settings.EMBEDDING_PROVIDER.lower()
+        knowledge_base = (
+            self.knowledge_base_repository.get_by_id(
+                DEFAULT_KNOWLEDGE_BASE_ID
+            )
         )
 
-        if provider == "local":
-            return (
-                settings.LOCAL_EMBEDDING_MODEL
+        if knowledge_base is None:
+            raise ValueError(
+                "Default knowledge base does not exist."
             )
 
-        if provider == "openai":
-            return (
-                settings.OPENAI_EMBEDDING_MODEL
+        return (
+            self.document_repository
+            .get_by_knowledge_base(
+                DEFAULT_KNOWLEDGE_BASE_ID
+            )
+        )
+
+    def get(
+        self,
+        document_id: str,
+    ) -> Document:
+        document = (
+            self.document_repository.get_by_id(
+                document_id
+            )
+        )
+
+        if document is None:
+            raise ValueError(
+                "Document not found."
             )
 
-        return "unknown"
+        if (
+            document.knowledge_base_id
+            != DEFAULT_KNOWLEDGE_BASE_ID
+        ):
+            raise ValueError(
+                "Document does not belong "
+                "to the default knowledge base."
+            )
+
+        return document
+
+    @staticmethod
+    def _validate_pdf(
+        file: UploadFile,
+    ) -> None:
+        filename = (
+            file.filename
+            or ""
+        )
+
+        content_type = (
+            file.content_type
+            or ""
+        )
+
+        if not filename.lower().endswith(
+            ".pdf"
+        ):
+            raise ValueError(
+                "Only PDF files are supported."
+            )
+
+        if content_type not in {
+            "application/pdf",
+            "application/octet-stream",
+            "",
+        }:
+            raise ValueError(
+                "Uploaded file must be a PDF."
+            )

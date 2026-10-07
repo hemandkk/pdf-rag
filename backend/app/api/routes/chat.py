@@ -1,17 +1,16 @@
-from fastapi import (
-    APIRouter,
-    HTTPException,
-    status,
-)
+import json
+from collections.abc import Iterator
+
+from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 
 from app.schemas.chat import (
     ChatRequest,
     ChatResponse,
-    SourceResponse,
 )
-from app.services.rag_service import (
-    RAGService,
-)
+from app.services.llm_service import LLMService
+from app.services.rag_service import RAGService
+from app.services.retrieval_service import RetrievalService
 
 
 router = APIRouter(
@@ -20,48 +19,87 @@ router = APIRouter(
 )
 
 
+retrieval_service = RetrievalService()
+llm_service = LLMService()
+
+rag_service = RAGService(
+    retrieval_service=retrieval_service,
+    llm_service=llm_service,
+)
+
+
 @router.post(
     "",
     response_model=ChatResponse,
 )
-def chat_with_document(
+def chat(
     request: ChatRequest,
 ) -> ChatResponse:
-
-    try:
-        rag_service = RAGService()
-
-        answer, search_results = (
-            rag_service.answer_question(
-                document_id=(
-                    request.document_id
-                ),
-                question=request.question,
-                top_k=request.top_k,
-            )
-        )
-
-    except Exception as exc:
-        raise HTTPException(
-            status_code=(
-                status.HTTP_500_INTERNAL_SERVER_ERROR
-            ),
-            detail=str(exc),
-        ) from exc
-
-    sources = [
-        SourceResponse(
-            page_number=result.page_number,
-            chunk_index=result.chunk_index,
-            text=result.text,
-            similarity=result.similarity,
-        )
-        for result in search_results
-    ]
-
-    return ChatResponse(
-        document_id=request.document_id,
+    return rag_service.chat(
         question=request.question,
-        answer=answer,
-        sources=sources,
+        top_k=request.top_k,
+    )
+
+
+@router.post("/stream")
+def chat_stream(
+    request: ChatRequest,
+) -> StreamingResponse:
+    sources, token_stream = rag_service.stream(
+        question=request.question,
+        top_k=request.top_k,
+    )
+
+    def event_stream() -> Iterator[str]:
+        try:
+            for token in token_stream:
+                payload = json.dumps(
+                    {"text": token},
+                    ensure_ascii=False,
+                )
+
+                yield (
+                    "event: token\n"
+                    f"data: {payload}\n\n"
+                )
+
+            sources_payload = json.dumps(
+                {
+                    "sources": [
+                        source.model_dump()
+                        for source in sources
+                    ]
+                },
+                ensure_ascii=False,
+            )
+
+            yield (
+                "event: sources\n"
+                f"data: {sources_payload}\n\n"
+            )
+
+            yield (
+                "event: done\n"
+                "data: {}\n\n"
+            )
+
+        except Exception as exc:
+            error_payload = json.dumps(
+                {"message": str(exc)},
+                ensure_ascii=False,
+            )
+
+            yield (
+                "event: error\n"
+                f"data: {error_payload}\n\n"
+            )
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )

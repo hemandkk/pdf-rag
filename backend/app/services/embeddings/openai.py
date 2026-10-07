@@ -16,15 +16,20 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             api_key=settings.OPENAI_API_KEY
         )
 
-        self.model = (
-            settings.OPENAI_EMBEDDING_MODEL
-        )
+        self.model = settings.OPENAI_EMBEDDING_MODEL
+
+    @property
+    def provider_name(self) -> str:
+        return "openai"
+
+    @property
+    def model_name(self) -> str:
+        return self.model
 
     def embed_documents(
         self,
         texts: list[str],
     ) -> list[list[float]]:
-
         if not texts:
             return []
 
@@ -42,7 +47,6 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
         self,
         text: str,
     ) -> list[float]:
-
         response = self.client.embeddings.create(
             model=self.model,
             input=text,

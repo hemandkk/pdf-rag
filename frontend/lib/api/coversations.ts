@@ -1,29 +1,45 @@
 import { apiRequest } from "@/lib/api/client";
-import type { ChatRequest, ChatResponse } from "@/lib/types/chat";
 
-const STREAM_ENDPOINT = "/chat/stream";
+import type { ChatSource } from "@/lib/types/chat";
 
-export interface StreamSourcesEvent {
-  sources: ChatResponse["sources"];
-}
+import type {
+  Conversation,
+  ConversationDetail,
+  CreateConversationRequest,
+} from "@/lib/types/converstion";
 
-export interface StreamHandlers {
-  onToken: (text: string) => void;
-  onSources: (sources: ChatResponse["sources"]) => void;
-  onDone: () => void;
-}
-
-export async function chatWithDocument(
-  request: ChatRequest,
-): Promise<ChatResponse> {
-  return apiRequest<ChatResponse>("/chat", {
+export async function createConversation(
+  request: CreateConversationRequest,
+): Promise<Conversation> {
+  return apiRequest<Conversation>("/conversations", {
     method: "POST",
     body: JSON.stringify(request),
   });
 }
 
-export async function streamChatWithDocument(
-  request: ChatRequest,
+export async function getConversations(
+  documentId: string,
+): Promise<Conversation[]> {
+  return apiRequest<Conversation[]>(`/conversations/document/${documentId}`);
+}
+
+export async function getConversation(
+  conversationId: string,
+): Promise<ConversationDetail> {
+  return apiRequest<ConversationDetail>(`/conversations/${conversationId}`);
+}
+
+interface StreamHandlers {
+  onToken: (text: string) => void;
+
+  onSources: (sources: ChatSource[]) => void;
+
+  onDone: () => void;
+}
+
+export async function streamConversationMessage(
+  conversationId: string,
+  question: string,
   handlers: StreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -33,13 +49,18 @@ export async function streamChatWithDocument(
     throw new Error("NEXT_PUBLIC_API_BASE_URL is not configured.");
   }
 
-  const response = await fetch(`${baseUrl}${STREAM_ENDPOINT}`, {
+  const url = `${baseUrl}/conversations/` + `${conversationId}/messages/stream`;
+
+  const params = new URLSearchParams({
+    question,
+    top_k: "5",
+  });
+
+  const response = await fetch(`${url}?${params.toString()}`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
       Accept: "text/event-stream",
     },
-    body: JSON.stringify(request),
     signal,
   });
 
@@ -54,7 +75,7 @@ export async function streamChatWithDocument(
           typeof errorBody.detail === "string" ? errorBody.detail : message;
       }
     } catch {
-      // Keep the default error message.
+      // Keep default error message.
     }
 
     throw new Error(message);

@@ -25,51 +25,39 @@ router = APIRouter(
     "/search",
     response_model=SearchResponse,
 )
-def search_document(
+def search_documents(
     request: SearchRequest,
 ) -> SearchResponse:
-
     try:
-        retrieval_service = (
-            RetrievalService()
+        retrieval_service = RetrievalService()
+
+        results = retrieval_service.debug_search(
+            query=request.query,
+            top_k=request.top_k,
         )
 
-        results = (
-            retrieval_service.debug_search(
-                document_id=(
-                    request.document_id
-                ),
-                query=request.query,
-                top_k=request.top_k,
-            )
-        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
     except Exception as exc:
         raise HTTPException(
-            status_code=(
-                status.HTTP_500_INTERNAL_SERVER_ERROR
-            ),
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
         ) from exc
 
     return SearchResponse(
-        document_id=request.document_id,
         query=request.query,
-        threshold=(
-            settings.RAG_SIMILARITY_THRESHOLD
-        ),
+        threshold=settings.RAG_SIMILARITY_THRESHOLD,
         results=[
             SearchResultResponse(
-                page_number=(
-                    item.result.page_number
-                ),
-                chunk_index=(
-                    item.result.chunk_index
-                ),
+                document_id=item.result.document_id,
+                page_number=item.result.page_number,
+                chunk_index=item.result.chunk_index,
                 text=item.result.text,
-                similarity=(
-                    item.result.similarity
-                ),
+                similarity=item.result.similarity,
                 accepted=item.accepted,
             )
             for item in results
