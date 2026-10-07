@@ -1,9 +1,14 @@
 import json
 from collections.abc import Iterator
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
+
+from app.services.llms.base import LLMProviderError
+from app.db.database import get_db
+from app.repositories.document_repository import DocumentRepository
 from app.schemas.chat import (
     ChatRequest,
     ChatResponse,
@@ -11,6 +16,9 @@ from app.schemas.chat import (
 from app.services.llm_service import LLMService
 from app.services.rag_service import RAGService
 from app.services.retrieval_service import RetrievalService
+from app.services.source_enrichment_service import (
+    SourceEnrichmentService,
+)
 
 
 router = APIRouter(
@@ -22,29 +30,50 @@ router = APIRouter(
 retrieval_service = RetrievalService()
 llm_service = LLMService()
 
-rag_service = RAGService(
-    retrieval_service=retrieval_service,
-    llm_service=llm_service,
-)
+
+def create_rag_service(
+    db: Session,
+) -> RAGService:
+    document_repository = DocumentRepository(db)
+
+    source_enrichment_service = SourceEnrichmentService(
+        document_repository=document_repository,
+    )
+
+    return RAGService(
+        retrieval_service=retrieval_service,
+        llm_service=llm_service,
+        source_enrichment_service=source_enrichment_service,
+    )
 
 
-@router.post(
-    "",
-    response_model=ChatResponse,
-)
+@router.post("", response_model=ChatResponse)
 def chat(
     request: ChatRequest,
+    db: Session = Depends(get_db),
 ) -> ChatResponse:
-    return rag_service.chat(
-        question=request.question,
-        top_k=request.top_k,
-    )
+    rag_service = create_rag_service(db)
+
+    try:
+        return rag_service.chat(
+            question=request.question,
+            top_k=request.top_k,
+        )
+
+    except LLMProviderError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
 
 
 @router.post("/stream")
 def chat_stream(
     request: ChatRequest,
+    db: Session = Depends(get_db),
 ) -> StreamingResponse:
+    rag_service = create_rag_service(db)
+
     sources, token_stream = rag_service.stream(
         question=request.question,
         top_k=request.top_k,

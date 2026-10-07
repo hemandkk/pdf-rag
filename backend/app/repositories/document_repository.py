@@ -18,6 +18,21 @@ class DocumentRepository:
 
         return document
 
+    def get_by_ids(
+        self,
+        document_ids: list[str],
+    ) -> list[Document]:
+        if not document_ids:
+            return []
+
+        statement = select(Document).where(
+            Document.id.in_(document_ids)
+        )
+
+        return list(
+            self.db.scalars(statement).all()
+        )
+
     def get_by_id(
         self,
         document_id: str,

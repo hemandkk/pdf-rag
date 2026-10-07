@@ -8,15 +8,21 @@ class MessageRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    def create(
-        self,
-        message: Message,
-    ) -> Message:
+    def create(self, message: Message) -> Message:
         self.db.add(message)
         self.db.commit()
         self.db.refresh(message)
-
         return message
+
+    def get_by_id(
+        self,
+        message_id: str,
+    ) -> Message | None:
+        statement = select(Message).where(
+            Message.id == message_id
+        )
+
+        return self.db.scalar(statement)
 
     def list_by_conversation(
         self,
@@ -31,6 +37,11 @@ class MessageRepository:
             .order_by(Message.created_at.asc())
         )
 
-        return list(
-            self.db.scalars(statement).all()
-        )
+        return list(self.db.scalars(statement).all())
+
+    def delete(
+        self,
+        message: Message,
+    ) -> None:
+        self.db.delete(message)
+        self.db.commit()

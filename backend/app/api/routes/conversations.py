@@ -1,11 +1,18 @@
 import json
 from collections.abc import Iterator
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
+from app.repositories.document_repository import (
+    DocumentRepository,
+)
 from app.schemas.conversation import (
     ConversationCreate,
     ConversationDetailResponse,
@@ -19,6 +26,9 @@ from app.services.rag_service import RAGService
 from app.services.retrieval_service import (
     RetrievalService,
 )
+from app.services.source_enrichment_service import (
+    SourceEnrichmentService,
+)
 
 
 router = APIRouter(
@@ -31,11 +41,25 @@ def get_conversation_service(
     db: Session = Depends(get_db),
 ) -> ConversationService:
     retrieval_service = RetrievalService()
+
     llm_service = LLMService()
+
+    document_repository = DocumentRepository(
+        db
+    )
+
+    source_enrichment_service = (
+        SourceEnrichmentService(
+            document_repository=document_repository,
+        )
+    )
 
     rag_service = RAGService(
         retrieval_service=retrieval_service,
         llm_service=llm_service,
+        source_enrichment_service=(
+            source_enrichment_service
+        ),
     )
 
     return ConversationService(
@@ -58,6 +82,7 @@ def create_conversation(
         return service.create(
             title=request.title,
         )
+
     except ValueError as exc:
         raise HTTPException(
             status_code=400,

@@ -4,15 +4,8 @@ from pydantic import BaseModel, Field
 
 
 class ChatRequest(BaseModel):
-    question: str = Field(
-        min_length=1,
-    )
-
-    top_k: int = Field(
-        default=5,
-        ge=1,
-        le=50,
-    )
+    question: str = Field(min_length=1)
+    top_k: int = Field(default=5, ge=1, le=50)
 
 
 class MessageResponse(BaseModel):
@@ -25,6 +18,7 @@ class MessageResponse(BaseModel):
 
 class SourceResponse(BaseModel):
     document_id: str
+    filename: str
     page_number: int
     chunk_index: int
     text: str

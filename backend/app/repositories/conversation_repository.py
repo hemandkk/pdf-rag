@@ -5,16 +5,10 @@ from app.db.models.conversation import Conversation
 
 
 class ConversationRepository:
-    def __init__(
-        self,
-        db: Session,
-    ) -> None:
+    def __init__(self, db: Session) -> None:
         self.db = db
 
-    def create(
-        self,
-        conversation: Conversation,
-    ) -> Conversation:
+    def create(self, conversation: Conversation) -> Conversation:
         self.db.add(conversation)
         self.db.commit()
         self.db.refresh(conversation)
@@ -27,7 +21,6 @@ class ConversationRepository:
         statement = select(Conversation).where(
             Conversation.id == conversation_id
         )
-
         return self.db.scalar(statement)
 
     def list_by_knowledge_base(
@@ -40,14 +33,10 @@ class ConversationRepository:
                 Conversation.knowledge_base_id
                 == knowledge_base_id
             )
-            .order_by(
-                Conversation.updated_at.desc()
-            )
+            .order_by(Conversation.updated_at.desc())
         )
 
-        return list(
-            self.db.scalars(statement).all()
-        )
+        return list(self.db.scalars(statement).all())
 
     def update(
         self,

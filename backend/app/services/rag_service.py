@@ -5,8 +5,9 @@ from app.schemas.chat import (
     SourceResponse,
 )
 from app.services.llm_service import LLMService
-from app.services.retrieval_service import (
-    RetrievalService,
+from app.services.retrieval_service import RetrievalService
+from app.services.source_enrichment_service import (
+    SourceEnrichmentService,
 )
 
 
@@ -15,9 +16,11 @@ class RAGService:
         self,
         retrieval_service: RetrievalService,
         llm_service: LLMService,
+        source_enrichment_service: SourceEnrichmentService,
     ) -> None:
         self.retrieval_service = retrieval_service
         self.llm_service = llm_service
+        self.source_enrichment_service = source_enrichment_service
 
     def _build_prompt(
         self,
@@ -87,7 +90,7 @@ Answer:
 
         for result in results:
             context_parts.append(
-                f"[Document ID: {result.document_id}]\n"
+                f"[Document: {result.filename}]\n"
                 f"[Page {result.page_number}]\n"
                 f"{result.text}"
             )
@@ -101,6 +104,7 @@ Answer:
         return [
             SourceResponse(
                 document_id=result.document_id,
+                filename=result.filename,
                 page_number=result.page_number,
                 chunk_index=result.chunk_index,
                 text=result.text,
@@ -115,10 +119,14 @@ Answer:
         history: list[dict[str, str]] | None = None,
         top_k: int | None = None,
     ) -> ChatResponse:
+
+        print("[RAG] Starting chat")
+        print("[RAG] Question:", question)
         results = self.retrieval_service.search(
             query=question,
             top_k=top_k,
         )
+        print(f"[RAG] Retrieval completed: {len(results)} results")
 
         if not results:
             return ChatResponse(
@@ -129,9 +137,30 @@ Answer:
                 ),
                 sources=[],
             )
+        print("[RAG] Starting source enrichment")
 
-        context = self._build_context(results)
+        enriched_results = self.source_enrichment_service.enrich(
+            results
+        )
+        print(
+            f"[RAG] Source enrichment completed: "
+            f"{len(enriched_results)} results"
+        )
+        if not enriched_results:
+            print("[RAG] No enriched results")
 
+            return ChatResponse(
+                question=question,
+                answer=(
+                    "I could not find that information "
+                    "in the documents."
+                ),
+                sources=[],
+            )
+
+        context = self._build_context(enriched_results)
+        print("[RAG] Context built")
+        print("[RAG] Calling LLM")
         prompt = self._build_prompt(
             question=question,
             context=context,
@@ -139,11 +168,12 @@ Answer:
         )
 
         answer = self.llm_service.generate(prompt)
+        print("[RAG] LLM completed")
 
         return ChatResponse(
             question=question,
             answer=answer,
-            sources=self._build_sources(results),
+            sources=self._build_sources(enriched_results),
         )
 
     def stream(
@@ -152,13 +182,18 @@ Answer:
         history: list[dict[str, str]] | None = None,
         top_k: int | None = None,
     ) -> tuple[list[SourceResponse], Iterator[str]]:
+        print("[RAG] stream() entered")
+        print("[RAG] Question:", question)
+
         results = self.retrieval_service.search(
             query=question,
             top_k=top_k,
         )
 
-        sources = self._build_sources(results)
-
+        print(
+            f"[RAG] Retrieval completed: {len(results)} results"
+        )
+      
         if not results:
 
             def fallback_stream() -> Iterator[str]:
@@ -167,10 +202,29 @@ Answer:
                     "in the documents."
                 )
 
-            return sources, fallback_stream()
+            return [], fallback_stream()
+        print("[RAG] Starting source enrichment")
 
-        context = self._build_context(results)
+        enriched_results = self.source_enrichment_service.enrich(
+            results
+        )
+        print("[RAG] Source enrichment completed")
 
+        if not enriched_results:
+
+            def enrichment_fallback_stream() -> Iterator[str]:
+                yield (
+                    "I could not find that information "
+                    "in the documents."
+                )
+
+            return [], enrichment_fallback_stream()
+        print("[RAG] Starting _build_sources ")
+
+        sources = self._build_sources(enriched_results)
+        print("[RAG] Starting Context built")
+        context = self._build_context(enriched_results)
+        print("[RAG] Context built")
         prompt = self._build_prompt(
             question=question,
             context=context,
